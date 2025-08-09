@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resume Parser Pro</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #4361ee;
+            --primary-dark: #3a56d4;
+            --secondary: #3f37c9;
+            --success: #4cc9f0;
+            --danger: #f72585;
+            --light: #f8f9fa;
+            --dark: #212529;
+            --gray: #6c757d;
+            --light-gray: #e9ecef;
+            --border-radius: 8px;
+            --box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%);
+            color: var(--dark);
+            line-height: 1.6;
+            min-height: 100vh;
+            padding: 2rem 1rem;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 0 1rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2.5rem;
+            animation: fadeIn 0.8s ease;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+            background: linear-gradient(90deg, #4361ee, #3f37c9);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: inline-block;
+        }
+
+        .subtitle {
+            color: var(--gray);
+            font-size: 1.1rem;
+            font-weight: 400;
+        }
+
+        .upload-container {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            padding: 2.5rem;
+            margin-bottom: 2rem;
+            transition: var(--transition);
+            animation: slideUp 0.6s ease;
+        }
+
+        .drop-zone {
+            border: 2px dashed #d1d5db;
+            border-radius: var(--border-radius);
+            padding: 3rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+            background: #f8f9ff;
+        }
+
+        .drop-zone:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+        }
+
+        .drop-zone.active {
+            border-color: var(--primary);
+            background-color: rgba(67, 97, 238, 0.05);
+        }
+
+        .drop-zone__icon {
+            font-size: 3.5rem;
+            color: var(--primary);
+            margin-bottom: 1rem;
+            opacity: 0.8;
+        }
+
+        .drop-zone__title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--dark);
+            margin-bottom: 0.5rem;
+        }
+
+        .drop-zone__info {
+            color: var(--gray);
+            margin-bottom: 1.5rem;
+            font-size: 0.95rem;
+        }
+
+        .drop-zone__browse {
+            color: var(--primary);
+            font-weight: 500;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .btn {
+            display: inline-block;
+            background: var(--primary);
+            color: white;
+            font-weight: 500;
+            padding: 0.75rem 2rem;
+            border-radius: 50px;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: var(--transition);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 15px rgba(67, 97, 238, 0.3);
+        }
+
+        .btn:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(67, 97, 238, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .file-info {
+            margin-top: 1.5rem;
+            text-align: center;
+            font-size: 0.95rem;
+            color: var(--gray);
+        }
+
+        .file-info__name {
+            font-weight: 500;
+            color: var(--dark);
+            margin-left: 0.5rem;
+        }
+
+        .file-info__size {
+            color: var(--gray);
+            font-size: 0.85rem;
+            margin-left: 0.5rem;
+        }
+
+        .results {
+            display: none;
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            padding: 2rem;
+            margin-top: 2rem;
+            animation: fadeIn 0.6s ease;
+        }
+
+        .results__header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--light-gray);
+        }
+
+        .results__title {
+            font-size: 1.5rem;
+            color: var(--dark);
+            font-weight: 600;
+        }
+
+        .results__content {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+        }
+
+        .section {
+            background: #f8f9ff;
+            border-radius: var(--border-radius);
+            padding: 1.5rem;
+        }
+
+        .section__title {
+            font-size: 1.2rem;
+            color: var(--primary);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .section__title i {
+            font-size: 1.1rem;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+
+        .info-item {
+            margin-bottom: 0.5rem;
+        }
+
+        .info-label {
+            font-weight: 500;
+            color: var(--dark);
+            margin-bottom: 0.25rem;
+            font-size: 0.95rem;
+        }
+
+        .info-value {
+            color: var(--gray);
+            font-size: 0.95rem;
+            word-break: break-word;
+        }
+
+        .skills-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .skill-tag {
+            background: var(--primary);
+            color: white;
+            padding: 0.35rem 1rem;
+            border-radius: 50px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: var(--transition);
+        }
+
+        .skill-tag i {
+            font-size: 0.7rem;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            display: none;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(67, 97, 238, 0.1);
+            border-radius: 50%;
+            border-top-color: var(--primary);
+            animation: spin 1s ease-in-out infinite;
+            margin: 0 auto 1rem;
+        }
+
+        .loading-text {
+            color: var(--gray);
+            font-size: 1.1rem;
+            margin-top: 1rem;
+        }
+
+        .error-message {
+            background: #fff5f5;
+            color: #e53e3e;
+            padding: 1rem;
+            border-radius: var(--border-radius);
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            display: none;
+        }
+
+        .error-message i {
+            font-size: 1.25rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--gray);
+        }
+
+        .empty-state i {
+            font-size: 3rem;
+            color: var(--light-gray);
+            margin-bottom: 1rem;
+            display: block;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 1.5rem 0.75rem;
+            }
+
+            .upload-container {
+                padding: 1.5rem;
+            }
+
+            .drop-zone {
+                padding: 2rem 1rem;
+            }
+
+            .drop-zone__title {
+                font-size: 1.25rem;
+            }
+
+            .results__content {
+                grid-template-columns: 1fr;
+            }
+
+            .info-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 480px) {
+            h1 {
+                font-size: 2rem;
+            }
+
+            .subtitle {
+                font-size: 1rem;
+            }
+
+            .btn {
+                width: 100%;
+                padding: 0.75rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Resume Parser Pro</h1>
+            <p class="subtitle">Extract skills and contact information from resumes in seconds</p>
+        </header>
+
+        <div class="error-message" id="error-message">
+            <i class="fas fa-exclamation-circle"></i>
+            <span id="error-text">An error occurred while processing your request.</span>
+        </div>
+
+        <div class="upload-container">
+            <div class="drop-zone" id="drop-zone">
+                <div class="drop-zone__icon">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                </div>
+                <h2 class="drop-zone__title">Upload Your Resume</h2>
+                <p class="drop-zone__info">
+                    Drag & drop your resume here or <span class="drop-zone__browse">browse</span>
+                </p>
+                <p class="drop-zone__types">
+                    Supported formats: PDF, DOCX
+                </p>
+                <input type="file" id="file-input" class="file-input" accept=".pdf,.docx">
+                <button type="button" id="parse-btn" class="btn" disabled>
+                    <i class="fas fa-cog me-2"></i>Parse
+                </button>
+            </div>
+            <div class="file-info" id="file-info"></div>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p class="loading-text">Analyzing your resume...</p>
+        </div>
+
+        <div class="results" id="results">
+            <div class="results__header">
+                <h2 class="results__title">Extracted Information</h2>
+                <button class="btn btn--outline" id="new-upload">
+                    <i class="fas fa-plus"></i> New Upload
+                </button>
+            </div>
+            <div class="results__content" id="results-content">
+                <!-- Results will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // DOM Elements
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-input');
+            const uploadBtn = document.getElementById('upload-btn');
+            const fileInfo = document.getElementById('file-info');
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+            const resultsContent = document.getElementById('results-content');
+            const errorMessage = document.getElementById('error-message');
+            const errorText = document.getElementById('error-text');
+            const newUploadBtn = document.getElementById('new-upload');
+            const parseBtn = document.getElementById('parse-btn');
+
+            let selectedFile = null;
+
+            // Event Listeners
+            dropZone.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', handleFileSelect);
+            parseBtn.addEventListener('click', handleUpload);
+            newUploadBtn.addEventListener('click', resetForm);
+
+            // Drag and drop events
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, preventDefaults, false);
+            });
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, highlight, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, unhighlight, false);
+            });
+
+            dropZone.addEventListener('drop', handleDrop, false);
+
+            // Functions
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            function highlight() {
+                dropZone.classList.add('active');
+            }
+
+            function unhighlight() {
+                dropZone.classList.remove('active');
+            }
+
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                handleFiles(files);
+            }
+
+            function handleFileSelect(e) {
+                const files = e.target.files;
+                handleFiles(files);
+            }
+
+            function handleFiles(files) {
+                if (files.length > 0) {
+                    const file = files[0];
+                    if (validateFile(file)) {
+                        selectedFile = file;
+                        updateFileInfo(file);
+                        parseBtn.disabled = false;
+                    }
+                }
+            }
+
+            function validateFile(file) {
+                const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+                const maxSize = 5 * 1024 * 1024; // 5MB
+                
+                if (!validTypes.includes(file.type)) {
+                    showError('Please upload a valid file (PDF or DOCX)');
+                    return false;
+                }
+                
+                if (file.size > maxSize) {
+                    showError('File size should be less than 5MB');
+                    return false;
+                }
+                
+                return true;
+            }
+
+            function updateFileInfo(file) {
+                const fileSize = (file.size / (1024 * 1024)).toFixed(2);
+                fileInfo.innerHTML = `
+                    <i class="fas fa-file-alt"></i>
+                    <span class="file-info__name">${file.name}</span>
+                    <span class="file-info__size">(${fileSize} MB)</span>
+                `;
+            }
+
+            async function handleUpload() {
+                if (!selectedFile) return;
+
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+
+                // Show loading state
+                loading.style.display = 'block';
+                hideError();
+                results.style.display = 'none';
+
+                try {
+                    const response = await fetch('/api/parse-resume', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Failed to process resume');
+                    }
+
+                    displayResults(data);
+                } catch (error) {
+                    showError(error.message || 'An error occurred while processing your resume');
+                } finally {
+                    loading.style.display = 'none';
+                }
+            }
+
+            function displayResults(data) {
+                // Clear previous results
+                resultsContent.innerHTML = '';
+
+                // Create contact information section
+                if (data.name || data.email || data.phone) {
+                    const contactSection = createSection('Contact Information', 'user');
+                    const contactGrid = document.createElement('div');
+                    contactGrid.className = 'info-grid';
+
+                    if (data.name) {
+                        contactGrid.appendChild(createInfoItem('Name', data.name, 'user'));
+                    }
+                    if (data.email) {
+                        contactGrid.appendChild(createInfoItem('Email', data.email, 'envelope'));
+                    }
+                    if (data.phone) {
+                        contactGrid.appendChild(createInfoItem('Phone', data.phone, 'phone'));
+                    }
+
+                    contactSection.appendChild(contactGrid);
+                    resultsContent.appendChild(contactSection);
+                }
+
+                // Create skills section
+                if (data.skills && Object.keys(data.skills).length > 0) {
+                    const skillsSection = createSection('Skills', 'code');
+                    const skillsContainer = document.createElement('div');
+                    skillsContainer.className = 'skills-container';
+
+                    for (const category in data.skills) {
+                        data.skills[category].forEach(skill => {
+                            const skillTag = document.createElement('span');
+                            skillTag.className = 'skill-tag';
+                            skillTag.innerHTML = `
+                                <i class="fas fa-check"></i>
+                                ${skill}
+                            `;
+                            skillsContainer.appendChild(skillTag);
+                        });
+                    }
+
+                    skillsSection.appendChild(skillsContainer);
+                    resultsContent.appendChild(skillsSection);
+                }
+
+                // Show results section
+                results.style.display = 'block';
+
+                // Scroll to results
+                results.scrollIntoView({ behavior: 'smooth' });
+            }
+
+            function createSection(title, icon) {
+                const section = document.createElement('div');
+                section.className = 'section';
+                
+                const sectionTitle = document.createElement('h3');
+                sectionTitle.className = 'section__title';
+                sectionTitle.innerHTML = `
+                    <i class="fas fa-${icon}"></i>
+                    ${title}
+                `;
+                
+                section.appendChild(sectionTitle);
+                return section;
+            }
+
+            function createInfoItem(label, value, icon = '') {
+                const item = document.createElement('div');
+                item.className = 'info-item';
+                
+                const labelEl = document.createElement('div');
+                labelEl.className = 'info-label';
+                if (icon) {
+                    labelEl.innerHTML = `<i class="fas fa-${icon}"></i> ${label}`;
+                } else {
+                    labelEl.textContent = label;
+                }
+                
+                const valueEl = document.createElement('div');
+                valueEl.className = 'info-value';
+                valueEl.textContent = value || 'Not specified';
+                
+                item.appendChild(labelEl);
+                item.appendChild(valueEl);
+                
+                return item;
+            }
+
+            function showError(message) {
+                errorText.textContent = message;
+                errorMessage.style.display = 'flex';
+                setTimeout(hideError, 5000);
+            }
+
+            function hideError() {
+                errorMessage.style.display = 'none';
+            }
+
+            function resetForm() {
+                fileInput.value = '';
+                fileInfo.textContent = '';
+                resultsSection.style.display = 'none';
+                uploadSection.style.display = 'block';
+                document.getElementById('parse-btn').disabled = true;
+                selectedFile = null;
+                // Scroll to top
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        });
+    </script>
+</body>
+</html>
