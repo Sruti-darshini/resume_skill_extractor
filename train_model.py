@@ -1,6 +1,4 @@
 import json
-import spacy
-from spacy.training import Example
 import numpy as np
 import os
 import random
@@ -9,25 +7,70 @@ from collections import defaultdict
 import re
 from sentence_transformers import SentenceTransformer, InputExample, losses
 from torch.utils.data import DataLoader
+import nltk
+from nltk.tokenize import sent_tokenize, word_tokenize
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
 
-def remove_overlapping_entities(entities):
-    """Remove overlapping entities by keeping the longest one."""
-    if not entities:
-        return []
+def prepare_training_data(json_file_path):
+    """Prepare training data for sentence transformer."""
+    with open(json_file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
     
-    # Sort by start position and then by length (longest first)
-    sorted_entities = sorted(entities, key=lambda x: (x[0], -len(x[2])))
+    examples = []
+    all_skills = set()
     
-    # Keep track of non-overlapping entities
-    result = []
-    last_end = -1
+    # First pass: collect all skills
+    for item in data:
+        if 'annotation' in item:
+            for annotation in item['annotation']:
+                if 'Skills' in annotation.get('label', []):
+                    for point in annotation.get('points', []):
+                        skill = point.get('text', '').strip()
+                        if skill:
+                            all_skills.add(skill)
     
-    for start, end, label in sorted_entities:
-        if start >= last_end:
-            result.append((start, end, label))
-            last_end = end
+    all_skills = list(all_skills)
+    if not all_skills:
+        raise ValueError("No skills found in the training data")
     
-    return result
+    # Second pass: create examples
+    for item in data:
+        if 'content' in item and 'annotation' in item:
+            text = item['content']
+            item_skills = set()
+            
+            # Extract skills from this item
+            for annotation in item['annotation']:
+                if 'Skills' in annotation.get('label', []):
+                    for point in annotation.get('points', []):
+                        skill = point.get('text', '').strip()
+                        if skill:
+                            item_skills.add(skill)
+            
+            # Create positive examples
+            for skill in item_skills:
+                examples.append(InputExample(
+                    texts=[text, skill],
+                    label=1.0
+                ))
+            
+            # Create negative examples (skills not in this item)
+            negative_skills = [s for s in all_skills if s not in item_skills]
+            if negative_skills and item_skills:
+                # Use up to 3 negative examples per item
+                for _ in range(min(3, len(negative_skills))):
+                    negative_skill = random.choice(negative_skills)
+                    examples.append(InputExample(
+                        texts=[text, negative_skill],
+                        label=0.0
+                    ))
+    
+    if not examples:
+        raise ValueError("No training examples could be created from the data")
+        
+    print(f"Created {len(examples)} training examples ({len([e for e in examples if e.label > 0.5])} positive, {len([e for e in examples if e.label <= 0.5])} negative)")
+    return examples
 
 def load_training_data(json_file):
     with open(json_file, 'r', encoding='utf-8') as f:
@@ -89,105 +132,94 @@ def load_training_data(json_file):
     
     return ner_training_data, skill_examples
 
-def fine_tune_spacy_ner(train_data):
-    # Load pre-trained model
-    nlp = spacy.load('en_core_web_lg')
+def preprocess_text(text):
+    """Basic text preprocessing."""
+    # Convert to lowercase
+    text = text.lower()
     
-    # Add NER pipe if not exists
-    if 'ner' not in nlp.pipe_names:
-        ner = nlp.add_pipe('ner')
-    else:
-        ner = nlp.get_pipe('ner')
+    # Remove special characters and digits
+    text = re.sub(r'[^a-zA-Z\s]', '', text)
     
-    # Add skill labels
-    for _, annotations in train_data:
-        for ent in annotations.get('entities', []):
-            ner.add_label(ent[2])
+    # Tokenize and remove stopwords
+    stop_words = set(stopwords.words('english'))
+    words = word_tokenize(text)
+    words = [word for word in words if word not in stop_words]
     
-    # Disable other pipes during training
-    other_pipes = [pipe for pipe in nlp.pipe_names if pipe != 'ner']
-    with nlp.disable_pipes(*other_pipes):
-        optimizer = nlp.begin_training()
-        
-        for itn in range(30):  # 30 iterations
-            random.shuffle(train_data)
-            losses = {}
-            
-            for text, annotations in train_data:
-                example = Example.from_dict(nlp.make_doc(text), annotations)
-                nlp.update([example], drop=0.5, losses=losses)
-            
-            print(f"Iteration {itn}, Losses: {losses}")
+    # Lemmatization
+    lemmatizer = WordNetLemmatizer()
+    words = [lemmatizer.lemmatize(word) for word in words]
     
-    return nlp
+    return ' '.join(words)
 
-def fine_tune_sentence_transformer(train_examples):
+def fine_tune_sentence_transformer(training_data_path, output_path):
+    """Fine-tune a sentence transformer model on skill-text pairs."""
+    # Load or initialize the model
     model = SentenceTransformer('all-MiniLM-L6-v2')
     
-    # Convert skill examples to sentence transformer format
-    train_samples = []
-    all_skills = set()
+    # Prepare training data
+    train_examples = prepare_training_data(training_data_path)
     
-    # First pass: collect all unique skills
-    for example in train_examples:
-        if example['skill']:
-            all_skills.add(example['skill'])
+    # Define the dataloader
+    train_dataloader = DataLoader(
+        train_examples, 
+        shuffle=True, 
+        batch_size=16
+    )
     
-    all_skills = list(all_skills)
-    
-    # Second pass: create training samples
-    for example in train_examples:
-        if example['text'] and example['skill']:
-            # Create positive example
-            train_samples.append(InputExample(
-                texts=[example['text'], example['skill']],
-                label=float(example['similarity_score'])))
-            
-            # Create negative example with a random different skill
-            if len(all_skills) > 1:  # Only if we have other skills to choose from
-                negative_skill = random.choice(all_skills)
-                while negative_skill == example['skill']:
-                    negative_skill = random.choice(all_skills)
-                
-                train_samples.append(InputExample(
-                    texts=[example['text'], negative_skill],
-                    label=0.0))
-    
-    print(f"Created {len(train_samples)} training examples")
-    
-    # Create dataloader
-    train_dataloader = DataLoader(train_samples, shuffle=True, batch_size=16)
-    
-    # Define loss function
+    # Define the loss function
     train_loss = losses.CosineSimilarityLoss(model)
     
-    # Fine-tune the model
-    print("Starting model training...")
-    model.fit(train_objectives=[(train_dataloader, train_loss)],
-              epochs=5,
-              warmup_steps=100,
-              output_path='./fine_tuned_skill_model')
+    # Train the model
+    model.fit(
+        train_objectives=[(train_dataloader, train_loss)],
+        epochs=3,
+        warmup_steps=100,
+        output_path=output_path
+    )
     
-    print("Training completed!")
     return model
 
 def main():
-    # Load and prepare training data
-    json_file = 'Entity_Recognition_Fixed.json'
-    ner_training_data, skill_examples = load_training_data(json_file)
+    try:
+        print("Starting training process...")
+        
+        # Download required NLTK data
+        print("\nDownloading NLTK resources...")
+        nltk.download('punkt', quiet=False)
+        nltk.download('stopwords', quiet=False)
+        nltk.download('wordnet', quiet=False)
+        
+        training_file = 'Entity_Recognition_Fixed.json'
+        output_dir = './fine_tuned_skill_model'
+        
+        print(f"\nUsing training data from: {os.path.abspath(training_file)}")
+        print(f"Model will be saved to: {os.path.abspath(output_dir)}")
+        
+        if not os.path.exists(training_file):
+            raise FileNotFoundError(f"Training file not found: {training_file}")
+        
+        # Fine-tune the sentence transformer model
+        print("\nFine-tuning sentence transformer model...")
+        model = fine_tune_sentence_transformer(
+            training_data_path=training_file,
+            output_path=output_dir
+        )
+        
+        print("\nTraining completed successfully!")
+        print(f"Model saved to: {os.path.abspath(output_dir)}")
+        
+    except Exception as e:
+        print(f"\nError during training: {str(e)}")
+        print("\nPlease ensure that:")
+        print("1. The training file exists and is in the correct format")
+        print("2. You have enough disk space")
+        print("3. You have a stable internet connection (for downloading models)")
+        print("4. You have the required permissions to write to the output directory")
+        return 1
     
-    print(f"Loaded {len(ner_training_data)} resumes for NER training")
-    print(f"Generated {len(skill_examples)} examples for sentence transformer training")
+    return 0
     
-    # Fine-tune both models
-    print("\nFine-tuning spaCy NER model...")
-    nlp = fine_tune_spacy_ner(ner_training_data)
-    nlp.to_disk('./fine_tuned_ner_model')
-    print("Saved fine-tuned NER model to ./fine_tuned_ner_model")
-    
-    print("\nFine-tuning sentence transformer model...")
-    model = fine_tune_sentence_transformer(skill_examples)
-    print("Saved fine-tuned sentence transformer model to ./fine_tuned_skill_model")
+    print("Fine-tuned sentence transformer model saved to 'fine_tuned_skill_model'")
 
 if __name__ == "__main__":
     main()
