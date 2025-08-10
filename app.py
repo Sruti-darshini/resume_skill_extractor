@@ -9,33 +9,161 @@ from collections import defaultdict
 from flask_cors import CORS
 import PyPDF2
 from docx import Document
-import spacy
 import numpy as np
 from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
+def cosine_similarity(embeddings1, embeddings2=None):
+    """Compute cosine similarity between two sets of embeddings.
+    
+    Args:
+        embeddings1: numpy array of shape (n_samples1, n_features)
+        embeddings2: numpy array of shape (n_samples2, n_features). If None, computes similarity with itself.
+    
+    Returns:
+        numpy array of shape (n_samples1, n_samples2) with cosine similarities
+    """
+    if embeddings2 is None:
+        embeddings2 = embeddings1
+    
+    # Normalize the embeddings
+    norm1 = np.linalg.norm(embeddings1, axis=1, keepdims=True)
+    norm2 = np.linalg.norm(embeddings2, axis=1, keepdims=True)
+    
+    # Avoid division by zero
+    norm1 = np.where(norm1 == 0, 1e-10, norm1)
+    norm2 = np.where(norm2 == 0, 1e-10, norm2)
+    
+    # Normalize
+    embeddings1 = embeddings1 / norm1
+    embeddings2 = embeddings2 / norm2
+    
+    # Compute dot product
+    return np.dot(embeddings1, embeddings2.T)
 import tempfile
 import nltk
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+from nltk import pos_tag, ne_chunk
+from nltk.tree import Tree
+import string
+from word2number import w2n
+from datetime import datetime
+from dateutil import parser
 from transformers import pipeline
 import torch
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from collections import defaultdict
 
-# Download required NLTK data
+# Initialize NLTK and sentence transformer
+print("\n=== INITIALIZING COMPONENTS ===")
 try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
-
-try:
-    nltk.data.find('taggers/averaged_perceptron_tagger')
-except LookupError:
-    nltk.download('averaged_perceptron_tagger')
-
-try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords')
+    # Download required NLTK data
+    print("\nChecking NLTK data...")
+    nltk_data = {
+        'punkt': 'tokenizers/punkt',
+        'stopwords': 'corpora/stopwords',
+        'wordnet': 'corpora/wordnet',
+        'averaged_perceptron_tagger': 'taggers/averaged_perceptron_tagger',
+        'maxent_ne_chunker': 'chunkers/maxent_ne_chunker',
+        'words': 'corpora/words'
+    }
+    
+    nltk_available = True
+    for name, path in nltk_data.items():
+        try:
+            nltk.data.find(path)
+            print(f"✓ NLTK {name} data found")
+        except LookupError:
+            print(f"  - Downloading NLTK {name} data...")
+            try:
+                nltk.download(name, quiet=True)
+                print(f"✓ Successfully downloaded NLTK {name} data")
+            except Exception as e:
+                print(f"✗ Failed to download NLTK {name} data: {str(e)}")
+                nltk_available = False
+    
+    # Initialize NLTK components
+    if nltk_available:
+        print("\nInitializing NLTK components...")
+        try:
+            stop_words = set(stopwords.words('english'))
+            lemmatizer = WordNetLemmatizer()
+            print("✓ NLTK components initialized successfully")
+        except Exception as e:
+            print(f"✗ Failed to initialize NLTK components: {str(e)}")
+            nltk_available = False
+            stop_words = set()
+            lemmatizer = WordNetLemmatizer()  # Initialize with default anyway
+    else:
+        print("\nSkipping NLTK initialization due to missing data")
+        stop_words = set()
+        lemmatizer = WordNetLemmatizer()
+    
+    # Initialize sentence transformer model
+    sentence_model = None
+    transformer_available = False
+    try:
+        print("\nInitializing Sentence Transformer...")
+        
+        # First try to load the fine-tuned model
+        fine_tuned_path = "./fine_tuned_skill_model"
+        if os.path.exists(fine_tuned_path) and os.path.isdir(fine_tuned_path):
+            print("  - Found fine-tuned model, loading...")
+            try:
+                sentence_model = SentenceTransformer(fine_tuned_path)
+                print("  ✓ Loaded fine-tuned model successfully")
+                transformer_available = True
+            except Exception as e:
+                print(f"  ✗ Failed to load fine-tuned model: {str(e)}")
+                print("  - Falling back to base model...")
+        
+        # If fine-tuned model not available or failed to load, use base model
+        if not transformer_available:
+            print("  - Loading base model (all-MiniLM-L6-v2)...")
+            sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
+            transformer_available = True
+            print("  ✓ Loaded base model successfully")
+        
+        print("✓ Sentence Transformer initialized successfully")
+        print(f"  - Model: {sentence_model._get_name()}")
+        print(f"  - Device: {next(sentence_model.parameters()).device}")
+        
+    except Exception as e:
+        print(f"✗ Failed to initialize Sentence Transformer: {str(e)}")
+        print("  - Semantic similarity features will be disabled")
+        transformer_available = False
+    
+    # Initialize skill embeddings
+    skill_embeddings = {}
+    if transformer_available and sentence_model:
+        print("\nInitializing skill embeddings...")
+        try:
+            skill_count = sum(len(skills) for skills in SKILL_DB.values())
+            print(f"Encoding {skill_count} skills...")
+            
+            for i, (category, skills) in enumerate(SKILL_DB.items(), 1):
+                print(f"  - Processing category {i}/{len(SKILL_DB)}: {category}")
+                for skill in skills:
+                    try:
+                        skill_embeddings[skill] = sentence_model.encode(skill, convert_to_tensor=True)
+                    except Exception as e:
+                        print(f"    ✗ Error encoding skill '{skill}': {str(e)}")
+            
+            print(f"✓ Successfully encoded {len(skill_embeddings)}/{skill_count} skills")
+        except Exception as e:
+            print(f"✗ Failed to initialize skill embeddings: {str(e)}")
+            skill_embeddings = {}
+    else:
+        print("\nSkipping skill embeddings (sentence transformer not available)")
+        
+except Exception as e:
+    print(f"Error during initialization: {str(e)}")
+    print("Some features may be limited")
+    stop_words = set()
+    lemmatizer = WordNetLemmatizer()
+    sentence_model = None
+    skill_embeddings = {}
 
 app = Flask(__name__)
 CORS(app)
@@ -44,19 +172,11 @@ CORS(app)
 def index():
     return render_template('index.html')
 
-# Initialize spaCy model
-try:
-    print("Load spaCy model")
-    nlp = spacy.load('en_core_web_lg')
-    print("Model loaded successfully")
-except Exception as e:
-    print(f"Error loading model: {str(e)}")
-    nlp = spacy.blank('en')
-
 def clean_text(text):
     """Remove leading unwanted symbols and spaces."""
     text = re.sub(r'[^\x00-\x7F]+', ' ', text)
     return text
+
 def extract_email(text):
     """Extract the first valid email address from the text."""
     try:
@@ -239,11 +359,16 @@ def extract_name(text):
                     print(f"Found name using pattern matching: {candidate}")
                     return candidate
         
-        # Method 2: Use spaCy NER
-        doc = nlp(first_chunk)
-        for ent in doc.ents:
-            if ent.label_ == 'PERSON':
-                name = ent.text.strip()
+        # Method 2: Use NLTK's NER
+        tokens = word_tokenize(first_chunk)
+        pos_tags = pos_tag(tokens)
+        ne_chunks = ne_chunk(pos_tags)
+        
+        for chunk in ne_chunks:
+            if hasattr(chunk, 'label'):
+                # This is a named entity
+                name = ' '.join(c[0] for c in chunk)
+                name = clean_text(name)
                 if len(name.split()) >= 2:
                     print(f"Found name using NER: {name}")
                     return name
@@ -331,25 +456,42 @@ def normalize_skill(skill):
     return ''.join(c.lower() for c in skill if c.isalnum())
 
 def get_skill_similarity(skill1, skill2):
-    """Get similarity score between two skills using word vectors"""
+    """Get similarity score between two skills using string similarity"""
     try:
-        return nlp(skill1).similarity(nlp(skill2))
-    except:
-        return 0
-
-# Initialize models
-try:
-    print("Loading fine-tuned NER model...")
-    nlp = spacy.load('./fine_tuned_ner_model')
-    print("Fine-tuned NER model loaded successfully")
-    
-    print("Loading fine-tuned sentence transformer model...")
-    sentence_model = SentenceTransformer('./fine_tuned_skill_model')
-    print("Fine-tuned sentence transformer model loaded successfully")
-except Exception as e:
-    print(f"Error loading models: {str(e)}")
-    nlp = None
-    sentence_model = None
+        # Convert skills to lowercase and remove special characters
+        skill1 = normalize_skill(skill1).lower()
+        skill2 = normalize_skill(skill2).lower()
+        
+        # Simple string similarity using Jaccard similarity on character n-grams
+        def get_ngrams(s, n=3):
+            s = f' {s} '  # Add padding
+            return [s[i:i+n] for i in range(len(s)-n+1)]
+        
+        n = 2  # Use bigrams
+        ngrams1 = set(get_ngrams(skill1, n))
+        ngrams2 = set(get_ngrams(skill2, n))
+        
+        if not ngrams1 or not ngrams2:
+            return 0.0
+            
+        intersection = len(ngrams1.intersection(ngrams2))
+        union = len(ngrams1.union(ngrams2))
+        
+        # Also consider word overlap
+        words1 = set(skill1.split())
+        words2 = set(skill2.split())
+        word_intersection = len(words1.intersection(words2))
+        word_union = len(words1.union(words2))
+        
+        # Combine n-gram and word overlap scores
+        ngram_similarity = intersection / union if union > 0 else 0
+        word_similarity = word_intersection / word_union if word_union > 0 else 0
+        
+        # Weighted average (adjust weights as needed)
+        return 0.7 * ngram_similarity + 0.3 * word_similarity
+    except Exception as e:
+        print(f"Error in get_skill_similarity: {str(e)}")
+        return 0.0
 
 # Comprehensive skill database
 SKILL_DB = {
@@ -423,34 +565,50 @@ def extract_skills_rule_based(text: str) -> Dict[str, Set[str]]:
         print(f"Error in rule-based extraction: {str(e)}")
         return defaultdict(set)
 
-def extract_skills_ner(text: str) -> Dict[str, Set[str]]:
-    """Extract skills using spaCy's NER with transformer model."""
-    if not nlp:
-        print("NER model not available, skipping NER extraction")
-        return defaultdict(set)
-    
+def extract_skills_ner(text: str):
+    """Extract skills using NLTK's NER and POS tagging."""
+    print("\n=== NER-BASED EXTRACTION STARTED ===")
     try:
+        # Ensure NLTK data is available
+        try:
+            nltk.data.find('tokenizers/punkt')
+            nltk.data.find('taggers/averaged_perceptron_tagger')
+            nltk.data.find('chunkers/maxent_ne_chunker')
+        except LookupError as e:
+            print("Downloading required NLTK data...")
+            nltk.download('punkt', quiet=True)
+            nltk.download('averaged_perceptron_tagger', quiet=True)
+            nltk.download('maxent_ne_chunker', quiet=True)
+            nltk.download('words', quiet=True)
+        
+        # Tokenize and tag parts of speech
+        tokens = word_tokenize(text)
+        pos_tags = pos_tag(tokens)
+        
+        # Use NLTK's named entity chunker
+        ne_chunks = ne_chunk(pos_tags)
         skills = defaultdict(set)
-        doc = nlp(text)
         
-        # Extract skills from NER
-        for ent in doc.ents:
-            if ent.label_ == 'SKILL':
-                # Clean and normalize the skill
-                skill = clean_text(ent.text)
-                if not skill:
-                    continue
+        # Extract named entities and noun phrases
+        for chunk in ne_chunks:
+            if hasattr(chunk, 'label'):
+                # This is a named entity
+                skill = ' '.join(c[0] for c in chunk)
+                skill = clean_text(skill)
+                if 1 <= len(skill.split()) <= 3:
+                    # Categorize the skill
+                    skill_lower = skill.lower()
+                    categorized = False
+                    for category, category_skills in SKILL_DB.items():
+                        if any(s.lower() in skill_lower or skill_lower in s.lower() for s in category_skills):
+                            skills[category].add(skill)
+                            categorized = True
                     
-                # Add to relevant categories
-                skill_lower = skill.lower()
-                for category, category_skills in SKILL_DB.items():
-                    if any(s.lower() in skill_lower or skill_lower in s.lower() for s in category_skills):
-                        skills[category].add(skill)
-                        
-                # If no category found, add to a general skills category
-                if not any(skill in category_skills for skills in skills.values()):
-                    skills['Other Skills'].add(skill)
+                    # If no category found, add to a general skills category
+                    if not categorized:
+                        skills['Other Skills'].add(skill)
         
+        print(f"Extracted {sum(len(s) for s in skills.values())} skills using NER")
         return skills
     except Exception as e:
         print(f"Error in NER extraction: {str(e)}")
@@ -458,13 +616,44 @@ def extract_skills_ner(text: str) -> Dict[str, Set[str]]:
 
 def find_similar_skills(text: str, threshold: float = 0.5) -> Dict[str, Set[str]]:
     """Detect skills using sentence embeddings for semantic similarity."""
-    if not nlp or not sentence_model:
+    print("\n=== SEMANTIC SIMILARITY STARTED ===")
+    global sentence_model, skill_embeddings
+    
+    # If sentence model is not available, try to initialize it
+    if sentence_model is None:
+        try:
+            print("Initializing sentence transformer model...")
+            sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
+            print("Sentence transformer model loaded successfully")
+            
+            # Initialize skill embeddings if needed
+            if not skill_embeddings and sentence_model:
+                print("Initializing skill embeddings...")
+                skill_embeddings = {}
+                for category, skills in SKILL_DB.items():
+                    for skill in skills:
+                        try:
+                            skill_embeddings[skill] = sentence_model.encode(skill, convert_to_tensor=True)
+                        except Exception as e:
+                            print(f"Error encoding skill '{skill}': {str(e)}")
+        except Exception as e:
+            print(f"Could not initialize sentence transformer: {str(e)}")
+            print("Semantic similarity features will be disabled")
+            return {}
+    
+    if not sentence_model:
         return {}
         
     skills = defaultdict(set)
     try:
-        # Split text into sentences and clean them
-        sentences = nltk.sent_tokenize(text)
+        # Ensure NLTK data is available
+        try:
+            nltk.data.find('tokenizers/punkt')
+        except LookupError:
+            nltk.download('punkt', quiet=True)
+        
+        # Split text into sentences using NLTK
+        sentences = sent_tokenize(text)
         cleaned_sentences = []
         
         # Clean and validate sentences
@@ -483,59 +672,111 @@ def find_similar_skills(text: str, threshold: float = 0.5) -> Dict[str, Set[str]
         
         # Process each category
         for category, category_skills in SKILL_DB.items():
-            # Get embeddings for skills in this category
-            skill_embeddings = sentence_model.encode(list(category_skills))
-            
-            # Compare each sentence with skills
-            for sent, sent_embedding in zip(cleaned_sentences, sentence_embeddings):
-                similarities = cosine_similarity([sent_embedding], skill_embeddings)[0]
+            if not category_skills:
+                continue
                 
-                # Add skills that meet the threshold and are actually mentioned
-                for skill, sim in zip(category_skills, similarities):
-                    if sim > threshold and skill.lower() in sent:
-                        skills[category].add(skill)
+            # Compare each sentence with skills in this category
+            for sent, sent_embedding in zip(cleaned_sentences, sentence_embeddings):
+                try:
+                    # Get embeddings for skills in this category if not already done
+                    if not skill_embeddings:
+                        skill_embeddings = {}
+                        for skill in category_skills:
+                            try:
+                                skill_embeddings[skill] = sentence_model.encode(skill, convert_to_tensor=True)
+                            except Exception as e:
+                                print(f"Error encoding skill '{skill}': {str(e)}")
+                    
+                    # Get similarities for skills that have embeddings
+                    valid_skills = []
+                    valid_skill_embeddings = []
+                    for skill in category_skills:
+                        if skill in skill_embeddings:
+                            valid_skills.append(skill)
+                            valid_skill_embeddings.append(skill_embeddings[skill])
+                    
+                    if not valid_skills:
+                        continue
+                        
+                    # Convert embeddings to numpy arrays if they're PyTorch tensors
+                    if hasattr(sent_embedding, 'cpu'):
+                        sent_embedding = sent_embedding.cpu().numpy()
+                    
+                    # Stack valid skill embeddings
+                    if valid_skill_embeddings and hasattr(valid_skill_embeddings[0], 'cpu'):
+                        valid_skill_embeddings = [e.cpu().numpy() for e in valid_skill_embeddings]
+                    
+                    # Calculate similarities
+                    similarities = cosine_similarity(
+                        np.array([sent_embedding]),
+                        np.array(valid_skill_embeddings)
+                    )[0]
+                    
+                    # Add skills that meet the threshold and are actually mentioned
+                    for skill, sim in zip(category_skills, similarities):
+                        if sim > threshold and skill.lower() in sent:
+                            skills[category].add(skill)
+                except Exception as e:
+                    print(f"Error comparing skills for category {category}: {str(e)}")
+                    continue
     except Exception as e:
         print(f"Error in semantic similarity: {str(e)}")
     
     return skills
 
-def extract_skills(text: str) -> Dict[str, List[str]]:
+def extract_skills(text: str) -> Dict[str, Set[str]]:
     """Hybrid skill extraction combining multiple approaches."""
+    print("\n" + "="*50)
+    print("STARTING SKILL EXTRACTION")
+    print("="*50)
     try:
-        # Limit text size to prevent memory issues
-        text = text[:100000]
         print("Starting skill extraction...")
         
-        # Step 1: Rule-based extraction (fast, exact matches)
+        # Step 1: Rule-based extraction (always available)
         print("Performing rule-based extraction...")
         rule_based_skills = extract_skills_rule_based(text)
         
-        # Step 2: NER-based extraction (context-aware) - only if model is available
-        ner_skills = defaultdict(set)
-        if nlp:
-            print("Performing NER-based extraction...")
+        # Step 2: NER-based extraction (using NLTK)
+        print("Performing NER-based extraction...")
+        ner_skills = {}
+        try:
             ner_skills = extract_skills_ner(text)
+        except Exception as e:
+            print(f"Error in NER extraction:\n{str(e)}")
+            # If NER fails, try to reinitialize NLTK data
+            try:
+                nltk.download('punkt', quiet=True)
+                nltk.download('averaged_perceptron_tagger', quiet=True)
+                nltk.download('maxent_ne_chunker', quiet=True)
+                nltk.download('words', quiet=True)
+                ner_skills = extract_skills_ner(text)  # Try again
+            except Exception as e2:
+                print(f"Retry failed for NER extraction: {str(e2)}")
         
-        # Step 3: Semantic similarity (handles variations) - only if model is available
-        similar_skills = defaultdict(set)
-        if sentence_model:
+        # Step 3: Semantic similarity (if model is available)
+        similar_skills = {}
+        try:
             print("Performing semantic similarity analysis...")
-            similar_skills = find_similar_skills(text)
+            similar_skills = find_similar_skills(text) or {}
+        except Exception as e:
+            print(f"Error in semantic similarity: {str(e)}")
         
         # Merge results from all methods
         final_skills = defaultdict(set)
         
         # Always include rule-based skills as the baseline
         for category, skills in rule_based_skills.items():
-            final_skills[category].update(skills)
-        
-        # Add NER and semantic skills if available
-        if nlp:
-            for category, skills in ner_skills.items():
+            if skills:  # Only add non-empty categories
                 final_skills[category].update(skills)
-                
-        if sentence_model:
-            for category, skills in similar_skills.items():
+        
+        # Add NER skills
+        for category, skills in ner_skills.items():
+            if skills:  # Only add non-empty categories
+                final_skills[category].update(skills)
+            
+        # Add similar skills if available
+        for category, skills in (similar_skills or {}).items():
+            if skills:  # Only add non-empty categories
                 final_skills[category].update(skills)
         
         # Post-process: Remove duplicates and sort
