@@ -6,7 +6,14 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize, QRect, QPoint
 from PyQt5.QtGui import QPixmap, QFont, QIcon, QColor, QPalette
 
 # Import your existing processing functions
-from app import extract_text_from_pdf, extract_text_from_docx, extract_skills, extract_name, extract_email, extract_phone
+from resume_core import (
+    extract_text_from_pdf,
+    extract_text_from_docx,
+    extract_skills,
+    extract_name,
+    extract_email,
+    extract_phone,
+)
 
 class WorkerThread(QThread):
     finished = pyqtSignal(dict)
