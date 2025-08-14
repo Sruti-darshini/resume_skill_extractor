@@ -1,0 +1,1 @@
+ powershell -NoProfile -ExecutionPolicy Bypass -Command "cd 'C:\Users\DELL\Downloads\resume_skill_extractor-main'; if (Test-Path dist) { Remove-Item -Recurse -Force dist }; if (Test-Path build) { Remove-Item -Recurse -Force build }; pyinstaller --clean --noconfirm launch.spec | cat"
